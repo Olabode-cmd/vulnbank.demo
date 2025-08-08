@@ -4,56 +4,43 @@ from psycopg2 import pool
 from datetime import datetime
 import time
 
-# Vulnerable database configuration
-# CWE-259: Use of Hard-coded Password
-# CWE-798: Use of Hard-coded Credentials
-DB_CONFIG = {
-    'dbname': os.getenv('DB_NAME', 'vulnerable_bank'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'postgres'),  # Hardcoded password in default value
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432')
-}
 
-# Create a connection pool
 connection_pool = None
 
-def init_connection_pool(min_connections=1, max_connections=10, max_retries=5, retry_delay=2):
-    """
-    Initialize the database connection pool with retry mechanism
-    Vulnerability: No connection encryption enforced
-    """
+def init_connection_pool(min_connections=1, max_connections=5):
     global connection_pool
-    retry_count = 0
-    
-    while retry_count < max_retries:
-        try:
-            connection_pool = psycopg2.pool.SimpleConnectionPool(
-                min_connections,
-                max_connections,
-                **DB_CONFIG
-            )
-            print("Database connection pool created successfully")
-            return
-        except Exception as e:
-            retry_count += 1
-            print(f"Failed to connect to database (attempt {retry_count}/{max_retries}): {e}")
-            if retry_count < max_retries:
-                print(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                print("Max retries reached. Could not establish database connection.")
-                raise e
+
+    # Prefer DATABASE_URL if available (e.g., in Render)
+    db_url = os.getenv('DATABASE_URL')
+    if db_url:
+        connection_pool = psycopg2.pool.SimpleConnectionPool(
+            min_connections,
+            max_connections,
+            dsn=db_url
+        )
+    else:
+        # Fallback for local dev
+        db_config = {
+            'dbname': os.getenv('DB_NAME', 'vulnerable_bank'),
+            'user': os.getenv('DB_USER', 'postgres'),
+            'password': os.getenv('DB_PASSWORD', 'postgres'),
+            'host': os.getenv('DB_HOST', 'localhost'),
+            'port': os.getenv('DB_PORT', '5432')
+        }
+        connection_pool = psycopg2.pool.SimpleConnectionPool(
+            min_connections,
+            max_connections,
+            **db_config
+        )
 
 def get_connection():
-    if connection_pool:
-        return connection_pool.getconn()
-    raise Exception("Connection pool not initialized")
+    if not connection_pool:
+        raise Exception("Connection pool is not initialized.")
+    return connection_pool.getconn()
 
-def return_connection(connection):
+def release_connection(conn):
     if connection_pool:
-        connection_pool.putconn(connection)
-
+        connection_pool.putconn(conn)
 def init_db():
     """
     Initialize database tables
